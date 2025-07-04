@@ -93,6 +93,12 @@ export default function Home() {
             >
               Join Room
             </button>
+            <button
+              onClick={() => router.push('/help')}
+              className="w-full p-4 border border-green-300 rounded text-center hover:bg-green-50 transition-colors"
+            >
+              How to Play
+            </button>
           </div>
         )}
 
