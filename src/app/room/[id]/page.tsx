@@ -57,7 +57,7 @@ export default function RoomPage() {
     try {
       const updatedRoom = await getRoom(roomId);
       // If the game has started and the user is not already a participant, silently fail
-      if (updatedRoom && updatedRoom.gameStarted && !updatedRoom.participants.find((p: any) => p.username === username)) {
+      if (updatedRoom && updatedRoom.gameStarted && !updatedRoom.participants.find((p: Participant) => p.username === username)) {
         setLoading(false);
         return;
       }
@@ -399,7 +399,7 @@ export default function RoomPage() {
                         <span>{gift.gifter}</span>
                         <span className="mx-2">→</span>
                         <span>{gift.recipient}</span>
-                        <span className="ml-4">"</span><span className="text-red-600">{gift.description}</span><span>"</span>
+                        <span className="ml-4">&quot;</span><span className="text-red-600">{gift.description}</span><span>&quot;</span>
                       </div>
                       <span className="text-green-600">{gift.amount}</span>
                     </div>
