@@ -112,15 +112,16 @@ export const startGame = async (roomId: string): Promise<void> => {
   
   const room = roomDoc.data() as Omit<Room, 'id'>;
   
-  if (room.participants.length < 2) {
-    throw new Error('Need at least 2 participants to start');
+  if (room.participants.length < 3) {
+    throw new Error('Need at least 3 participants to start');
   }
   
   console.log('Starting game with participants:', room.participants);
   console.log('Budget:', room.budget);
   
   // Create initial assignments
-  const assignments = createAssignments(room.participants, room.budget);
+  const prevGifters = room.activeAssignments ? room.activeAssignments.map(a => a.gifter) : [];
+  const assignments = createAssignments(room.participants, room.budget, prevGifters);
   
   console.log('Created assignments:', assignments);
   
@@ -140,28 +141,44 @@ export const startGame = async (roomId: string): Promise<void> => {
 };
 
 // Create assignments for gifters
-const createAssignments = (participants: Participant[], budget: number): Assignment[] => {
+const createAssignments = (participants: Participant[], budget: number, prevGifters: string[] = []): Assignment[] => {
   const eligibleRecipients = participants.filter(p => p.received < budget);
-  const availableGifters = participants.filter(p => !p.isGifter);
   
+  // First, check if there are people who haven't made a gift yet (spent = 0)
+  const peopleWhoHaventGifted = participants.filter(p => p.spent === 0 && !prevGifters.includes(p.username));
+  
+  // If there are people who haven't gifted yet, only select from them
+  // Otherwise, select from anyone who hasn't been a gifter recently
+  const availableGifters = peopleWhoHaventGifted.length > 0 
+    ? peopleWhoHaventGifted
+    : participants.filter(p => !p.isGifter && !prevGifters.includes(p.username));
+
   if (eligibleRecipients.length === 0 || availableGifters.length === 0) {
     return [];
   }
-  
+
   const maxGifters = Math.floor(participants.length / 2);
   const assignments: Assignment[] = [];
-  
+
   // Shuffle arrays for randomness
   const shuffledRecipients = [...eligibleRecipients].sort(() => Math.random() - 0.5);
   const shuffledGifters = [...availableGifters].sort(() => Math.random() - 0.5);
-  
-  for (let i = 0; i < Math.min(maxGifters, shuffledGifters.length, shuffledRecipients.length); i++) {
-    assignments.push({
-      gifter: shuffledGifters[i].username,
-      recipient: shuffledRecipients[i].username
-    });
+
+  const usedRecipients = new Set<string>();
+  for (const gifter of shuffledGifters) {
+    const recipient = shuffledRecipients.find(
+      r => r.username !== gifter.username && !usedRecipients.has(r.username)
+    );
+    if (recipient) {
+      assignments.push({
+        gifter: gifter.username,
+        recipient: recipient.username
+      });
+      usedRecipients.add(recipient.username);
+      if (assignments.length >= maxGifters) break;
+    }
   }
-  
+
   return assignments;
 };
 
@@ -217,7 +234,7 @@ export const addGift = async (
   });
   
   // Create new assignments if there are eligible recipients
-  const newAssignments = createNewAssignments(finalParticipants, room.budget, updatedAssignments);
+  const newAssignments = createNewAssignments(finalParticipants, room.budget, updatedAssignments, [gifter]);
   
   // Update participants with new assignments
   const finalParticipantsWithAssignments = finalParticipants.map(p => ({
@@ -237,36 +254,61 @@ export const addGift = async (
 const createNewAssignments = (
   participants: Participant[], 
   budget: number, 
-  currentAssignments: Assignment[]
+  currentAssignments: Assignment[],
+  excludeGifters: string[] = []
 ): Assignment[] => {
   const eligibleRecipients = participants.filter(p => p.received < budget);
-  const availableGifters = participants.filter(p => 
-    !p.isGifter && 
-    !currentAssignments.some(a => a.gifter === p.username)
+  const prevGifters = currentAssignments.map(a => a.gifter);
+  
+  // First, check if there are people who haven't made a gift yet (spent = 0)
+  const peopleWhoHaventGifted = participants.filter(p => 
+    p.spent === 0 && 
+    !currentAssignments.some(a => a.gifter === p.username) &&
+    !prevGifters.includes(p.username) &&
+    !excludeGifters.includes(p.username)
   );
   
+  // If there are people who haven't gifted yet, only select from them
+  // Otherwise, select from anyone who hasn't been a gifter recently
+  const availableGifters = peopleWhoHaventGifted.length > 0 
+    ? peopleWhoHaventGifted
+    : participants.filter(p => 
+        !p.isGifter && 
+        !currentAssignments.some(a => a.gifter === p.username) &&
+        !prevGifters.includes(p.username) &&
+        !excludeGifters.includes(p.username)
+      );
+
   if (eligibleRecipients.length === 0 || availableGifters.length === 0) {
     return [];
   }
-  
+
   const maxGifters = Math.floor(participants.length / 2);
   const currentGifterCount = currentAssignments.length;
-  
+
   if (currentGifterCount >= maxGifters) {
     return [];
   }
-  
+
   const assignments: Assignment[] = [];
   const shuffledRecipients = [...eligibleRecipients].sort(() => Math.random() - 0.5);
   const shuffledGifters = [...availableGifters].sort(() => Math.random() - 0.5);
-  
-  for (let i = 0; i < Math.min(maxGifters - currentGifterCount, shuffledGifters.length, shuffledRecipients.length); i++) {
-    assignments.push({
-      gifter: shuffledGifters[i].username,
-      recipient: shuffledRecipients[i].username
-    });
+
+  const usedRecipients = new Set<string>(currentAssignments.map(a => a.recipient));
+  for (const gifter of shuffledGifters) {
+    const recipient = shuffledRecipients.find(
+      r => r.username !== gifter.username && !usedRecipients.has(r.username)
+    );
+    if (recipient) {
+      assignments.push({
+        gifter: gifter.username,
+        recipient: recipient.username
+      });
+      usedRecipients.add(recipient.username);
+      if (assignments.length + currentGifterCount >= maxGifters) break;
+    }
   }
-  
+
   return assignments;
 };
 

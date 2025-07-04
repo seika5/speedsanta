@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
-import { subscribeToRoom, joinRoom, startGame, addGift, copyRoomId, revealGifts } from '../../../lib/firebase';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
+import { subscribeToRoom, joinRoom, startGame, addGift, copyRoomId, revealGifts, getRoom } from '../../../lib/firebase';
 import { Room, Participant } from '../../../types';
+import { QRCodeCanvas } from 'qrcode.react';
 
 export default function RoomPage() {
   const params = useParams();
@@ -15,12 +16,11 @@ export default function RoomPage() {
   const [isJoining, setIsJoining] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [currentUser, setCurrentUser] = useState<Participant | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [showQR, setShowQR] = useState(false);
   
-  // Gift form state
-  const [giftDescription, setGiftDescription] = useState('');
-  const [giftAmount, setGiftAmount] = useState('');
-
+  const router = useRouter();
+  
   useEffect(() => {
     if (!roomId) return;
 
@@ -32,24 +32,16 @@ export default function RoomPage() {
 
     const unsubscribe = subscribeToRoom(roomId, (roomData) => {
       setRoom(roomData);
-      
-      // Check if current user is in the room
-      if (roomData && username) {
-        const user = roomData.participants.find(p => p.username === username);
-        setCurrentUser(user || null);
-      }
-      
-      // Check if gifts should be revealed
-      if (roomData && roomData.gameStarted) {
-        const allAtBudget = roomData.participants.every(p => p.received >= roomData.budget);
-        if (allAtBudget) {
-          revealGifts(roomId);
-        }
-      }
     });
 
     return () => unsubscribe();
   }, [roomId, username, searchParams]);
+
+  useEffect(() => {
+    if (room?.gameStarted) {
+      setLoading(false);
+    }
+  }, [room?.gameStarted]);
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,16 +55,21 @@ export default function RoomPage() {
     }
 
     try {
+      const updatedRoom = await getRoom(roomId);
+      // If the game has started and the user is not already a participant, silently fail
+      if (updatedRoom && updatedRoom.gameStarted && !updatedRoom.participants.find((p: any) => p.username === username)) {
+        setLoading(false);
+        return;
+      }
       const success = await joinRoom(roomId, username);
       if (success) {
         setIsJoining(false);
-        setCurrentUser(room?.participants.find(p => p.username === username) || null);
+        // Update the URL to include ?username=USERNAME
+        router.replace(`/room/${roomId}?username=${encodeURIComponent(username)}`);
       } else {
-        setError('Cannot join this room. It may not exist or the game has already started.');
         setLoading(false);
       }
     } catch {
-      setError('Failed to join room. Please try again.');
       setLoading(false);
     }
   };
@@ -90,46 +87,99 @@ export default function RoomPage() {
     }
   };
 
-  const handleAddGift = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    
-    if (!currentUser?.recipient || !giftDescription.trim() || !giftAmount) {
-      setError('Please fill in all fields');
-      return;
-    }
-
-    const amount = parseInt(giftAmount);
-    if (isNaN(amount) || amount <= 0) {
-      setError('Please enter a valid amount');
-      return;
-    }
-
-    if (currentUser.spent + amount > room!.budget) {
-      setError('This would exceed your budget');
-      return;
-    }
-
-    setLoading(true);
-    
-    try {
-      await addGift(roomId, currentUser.username, currentUser.recipient, giftDescription, amount);
-      setGiftDescription('');
-      setGiftAmount('');
-    } catch {
-      setError('Failed to add gift. Please try again.');
-      setLoading(false);
-    }
-  };
-
   const handleCopyRoomId = async () => {
     try {
       await copyRoomId(roomId);
-      // Could add a toast notification here
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch {
       setError('Failed to copy room ID');
     }
   };
+
+  function GiftForm({ roomId, currentUser, room }: { roomId: string, currentUser: Participant, room: Room }) {
+    const [giftDescription, setGiftDescription] = useState('');
+    const [giftAmount, setGiftAmount] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleAddGift = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setError('');
+      setLoading(true);
+      if (!currentUser?.recipient || !giftDescription.trim() || !giftAmount) {
+        setError('Please fill in all fields');
+        setLoading(false);
+        return;
+      }
+      const amount = parseInt(giftAmount);
+      if (isNaN(amount) || amount <= 0) {
+        setError('Please enter a valid amount');
+        setLoading(false);
+        return;
+      }
+      try {
+        await addGift(roomId, currentUser.username, currentUser.recipient, giftDescription, amount);
+        setGiftDescription('');
+        setGiftAmount('');
+        setLoading(false);
+      } catch {
+        setError('Failed to add gift. Please try again.');
+        setLoading(false);
+      }
+    };
+
+    const recipient = room?.participants.find(p => p.username === currentUser.recipient);
+    const remaining = recipient ? Math.max(room.budget - recipient.received, 0) : 0;
+
+    return (
+      <div className="p-4 border border-gray-300 rounded">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg">You are gifting to: {currentUser.recipient}</h2>
+          {recipient && (
+            <span className="text-green-600 text-sm">{remaining} remaining</span>
+          )}
+        </div>
+        {error && (
+          <div className="mb-2 p-2 bg-red-100 border border-red-300 rounded text-red-700">{error}</div>
+        )}
+        <form onSubmit={handleAddGift} className="space-y-3">
+          <div>
+            <label className="block mb-1">Gift Description</label>
+            <input
+              type="text"
+              value={giftDescription}
+              onChange={(e) => setGiftDescription(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded"
+              placeholder="Describe the gift"
+              required
+            />
+          </div>
+          <div>
+            <label className="block mb-1">Amount</label>
+            <input
+              type="number"
+              value={giftAmount}
+              onChange={(e) => setGiftAmount(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded"
+              placeholder="Enter amount"
+              required
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full p-3 border border-blue-300 rounded text-center hover:bg-blue-50 transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Adding...' : 'Add Gift'}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  const urlUsername = searchParams.get('username') || '';
+  const currentUser = room?.participants.find(p => p.username === urlUsername) || null;
 
   if (!room) {
     return (
@@ -142,7 +192,7 @@ export default function RoomPage() {
   }
 
   // Show join form if user is not in the room and no username has been provided
-  if (!currentUser && !isJoining && !username) {
+  if (!currentUser && !isJoining) {
     return (
       <div className="min-h-screen p-4 flex items-center justify-center">
         <div className="w-full max-w-md">
@@ -222,8 +272,31 @@ export default function RoomPage() {
   }
 
   const currentGifters = room.participants.filter(p => p.isGifter);
-  const visibleGifts = room.gifts.filter(gift => !gift.isHidden || gift.gifter === currentUser?.username);
+  const visibleGifts = room.gifts;
   const allAtBudget = room.participants.every(p => p.received >= room.budget);
+
+  // Calculate average spent
+  const averageSpent = room.participants.length > 0
+    ? (room.participants.reduce((sum, p) => sum + p.spent, 0) / room.participants.length)
+    : 0;
+
+  function StartGameButton({ onStart, disabled }: { onStart: () => Promise<void>, disabled: boolean }) {
+    const [loading, setLoading] = useState(false);
+    const handleClick = async () => {
+      setLoading(true);
+      await onStart();
+      setLoading(false);
+    };
+    return (
+      <button
+        onClick={handleClick}
+        disabled={loading || disabled}
+        className="w-full p-4 border border-blue-300 rounded text-center hover:bg-blue-50 transition-colors disabled:opacity-50"
+      >
+        {loading ? 'Starting...' : 'Start SpeedSanta'}
+      </button>
+    );
+  }
 
   return (
     <div className="min-h-screen p-4">
@@ -233,12 +306,24 @@ export default function RoomPage() {
           <h1 className="text-2xl mb-2">{room.name}</h1>
           <div className="flex items-center justify-between">
             <p>Budget: <span className="text-green-600">{room.budget}</span></p>
-            <button
-              onClick={handleCopyRoomId}
-              className="p-2 border border-blue-300 rounded hover:bg-blue-50 transition-colors"
-            >
-              Share Room
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleCopyRoomId}
+                className="p-2 border border-blue-300 rounded hover:bg-blue-50 transition-colors"
+              >
+                {copied ? (
+                  <span className="flex items-center">✔</span>
+                ) : (
+                  'Room ID'
+                )}
+              </button>
+              <button
+                onClick={() => setShowQR(true)}
+                className="p-2 border border-blue-300 rounded hover:bg-blue-50 transition-colors"
+              >
+                QR Code
+              </button>
+            </div>
           </div>
         </div>
 
@@ -251,19 +336,25 @@ export default function RoomPage() {
         {/* Start Game Button */}
         {!room.gameStarted && (
           <div className="mb-6">
-            <button
-              onClick={handleStartGame}
-              disabled={loading || room.participants.length < 2}
-              className="w-full p-4 border border-blue-300 rounded text-center hover:bg-blue-50 transition-colors disabled:opacity-50"
-            >
-              {loading ? 'Starting...' : 'Start SpeedSanta'}
-            </button>
+            <StartGameButton onStart={handleStartGame} disabled={room.participants.length < 3} />
           </div>
         )}
 
         {/* Game Interface */}
         {room.gameStarted && (
           <div className="space-y-6">
+            {/* Game Status */}
+            {allAtBudget && (
+              <div className="p-4 bg-green-100 border border-green-300 rounded">
+                <p className="text-center">All participants have reached their targets!</p>
+              </div>
+            )}
+
+            {/* Your Assignment */}
+            {currentUser?.isGifter && currentUser.recipient && (
+              <GiftForm roomId={roomId} currentUser={currentUser} room={room} />
+            )}
+
             {/* Current Gifters */}
             <div className="p-4 border border-gray-300 rounded">
               <h2 className="text-lg mb-3">Current Gifters</h2>
@@ -281,66 +372,27 @@ export default function RoomPage() {
               )}
             </div>
 
-            {/* Your Assignment */}
-            {currentUser?.isGifter && currentUser.recipient && (
-              <div className="p-4 border border-gray-300 rounded">
-                <h2 className="text-lg mb-3">You are gifting to: {currentUser.recipient}</h2>
-                <form onSubmit={handleAddGift} className="space-y-3">
-                  <div>
-                    <label className="block mb-1">Gift Description</label>
-                    <input
-                      type="text"
-                      value={giftDescription}
-                      onChange={(e) => setGiftDescription(e.target.value)}
-                      className="w-full p-3 border border-gray-300 rounded"
-                      placeholder="Describe the gift"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block mb-1">Amount</label>
-                    <input
-                      type="number"
-                      value={giftAmount}
-                      onChange={(e) => setGiftAmount(e.target.value)}
-                      className="w-full p-3 border border-gray-300 rounded"
-                      placeholder="Enter amount"
-                      min="1"
-                      max={room.budget - currentUser.spent}
-                      required
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full p-3 border border-blue-300 rounded text-center hover:bg-blue-50 transition-colors disabled:opacity-50"
-                  >
-                    {loading ? 'Adding...' : 'Add Gift'}
-                  </button>
-                </form>
-              </div>
-            )}
-
             {/* Balance Table */}
             <div className="p-4 border border-gray-300 rounded">
               <h2 className="text-lg mb-3">Balances</h2>
+              <div className="mb-2 text-gray-700">Avg. Spent / Budget: <span className="ml-2 text-green-600">{averageSpent.toFixed(2)}</span> / <span className="text-green-600">{room.budget}</span></div>
               <div className="space-y-2">
                 {room.participants.map(participant => (
                   <div key={participant.username} className="flex justify-between items-center">
                     <span>{participant.username}</span>
                     <div className="flex space-x-4">
-                      <span className="text-green-600">Spent: {participant.spent}</span>
-                      <span className="text-green-600">Received: {participant.received}</span>
+                      <span className="mr-2">Spent:</span><span className="text-green-600">{participant.spent}</span>
+                      <span className="mr-2">Received:</span><span className="text-green-600">{participant.received}</span>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Recent Gifts */}
+            {/* Gifts */}
             {visibleGifts.length > 0 && (
               <div className="p-4 border border-gray-300 rounded">
-                <h2 className="text-lg mb-3">Recent Gifts</h2>
+                <h2 className="text-lg mb-3">Gifts</h2>
                 <div className="space-y-2">
                   {visibleGifts.slice(-10).reverse().map(gift => (
                     <div key={gift.id} className="flex justify-between items-center">
@@ -348,21 +400,12 @@ export default function RoomPage() {
                         <span>{gift.gifter}</span>
                         <span className="mx-2">→</span>
                         <span>{gift.recipient}</span>
-                        {!gift.isHidden && (
-                          <span className="ml-2 text-gray-600">({gift.description})</span>
-                        )}
+                        <span className="ml-4">"</span><span className="text-red-600">{gift.description}</span><span>"</span>
                       </div>
                       <span className="text-green-600">{gift.amount}</span>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {/* Game Status */}
-            {allAtBudget && (
-              <div className="p-4 bg-green-100 border border-green-300 rounded">
-                <p className="text-center">All participants have reached their budget! Gifts are now visible.</p>
               </div>
             )}
           </div>
@@ -381,6 +424,20 @@ export default function RoomPage() {
           </div>
         </div>
       </div>
+
+      {showQR && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded shadow-lg flex flex-col items-center">
+            <QRCodeCanvas value={typeof window !== 'undefined' ? window.location.origin + `/room/${roomId}` : ''} size={256} />
+            <button
+              onClick={() => setShowQR(false)}
+              className="mt-4 px-4 py-2 border border-blue-300 rounded hover:bg-blue-50 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 } 
