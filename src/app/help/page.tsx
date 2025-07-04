@@ -24,7 +24,7 @@ export default function Help() {
           <h2 className="text-2xl font-semibold text-gray-800 mb-4">🎄 About SpeedSanta</h2>
           <div className="prose max-w-none text-gray-700">
             <p className="mb-4">
-              SpeedSanta is my take on Secret Santa; it's a fast-paced, real-time gift exchange game.
+              SpeedSanta is my take on Secret Santa; it&apos;s a fast-paced, real-time gift exchange game.
             </p>
             <p>
               The game takes aspects from Secret Santa, the joy of giving and the element of surprise,
@@ -66,8 +66,8 @@ export default function Help() {
             <div>
               <h3 className="text-xl font-medium text-gray-800 mb-3">💡 Pro Tips</h3>
               <ul className="list-disc list-inside space-y-2 text-gray-700 ml-4">
-                <li>Try not to influence someone's gift if you suspect you're the recipient, let them cook!</li>
-                <li>Try not to spend too much of someones budget in one gift!</li>
+                <li>Try not to influence someone&apos;s gift if you suspect you&apos;re the recipient, let them cook!</li>
+                <li>Try not to spend too much of someone&apos;s budget in one gift!</li>
                 <li>Have fun and be creative with your gift choices!</li>
               </ul>
             </div>
