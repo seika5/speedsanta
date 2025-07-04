@@ -12,8 +12,6 @@ export interface Gift {
   recipient: string;
   description: string;
   amount: number;
-  timestamp: number;
-  isHidden: boolean;
 }
 
 export interface Assignment {

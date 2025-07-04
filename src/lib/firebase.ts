@@ -116,22 +116,15 @@ export const startGame = async (roomId: string): Promise<void> => {
     throw new Error('Need at least 3 participants to start');
   }
   
-  console.log('Starting game with participants:', room.participants);
-  console.log('Budget:', room.budget);
-  
   // Create initial assignments
   const prevGifters = room.activeAssignments ? room.activeAssignments.map(a => a.gifter) : [];
   const assignments = createAssignments(room.participants, room.budget, prevGifters);
-  
-  console.log('Created assignments:', assignments);
   
   const updatedParticipants = room.participants.map(p => ({
     ...p,
     isGifter: assignments.some(a => a.gifter === p.username),
     recipient: assignments.find(a => a.gifter === p.username)?.recipient ?? null
   }));
-  
-  console.log('Updated participants:', updatedParticipants);
   
   await updateDoc(roomRef, {
     gameStarted: true,
@@ -204,9 +197,7 @@ export const addGift = async (
     gifter,
     recipient,
     description,
-    amount,
-    timestamp: Date.now(),
-    isHidden: true // Hidden until all participants reach budget
+    amount
   };
   
   // Update participants' spent/received amounts
@@ -310,24 +301,6 @@ const createNewAssignments = (
   }
 
   return assignments;
-};
-
-// Reveal gifts when all participants reach budget
-export const revealGifts = async (roomId: string): Promise<void> => {
-  const roomRef = doc(db, ROOMS_COLLECTION, roomId);
-  const roomDoc = await getDoc(roomRef);
-  
-  if (!roomDoc.exists()) {
-    return;
-  }
-  
-  const room = roomDoc.data() as Omit<Room, 'id'>;
-  const allAtBudget = room.participants.every(p => p.received >= room.budget);
-  
-  if (allAtBudget) {
-    const revealedGifts = room.gifts.map(gift => ({ ...gift, isHidden: false }));
-    await updateDoc(roomRef, { gifts: revealedGifts });
-  }
 };
 
 // Copy room ID to clipboard

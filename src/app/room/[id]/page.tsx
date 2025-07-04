@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
-import { subscribeToRoom, joinRoom, startGame, addGift, copyRoomId, revealGifts, getRoom } from '../../../lib/firebase';
+import { subscribeToRoom, joinRoom, startGame, addGift, copyRoomId, getRoom } from '../../../lib/firebase';
 import { Room, Participant } from '../../../types';
 import { QRCodeCanvas } from 'qrcode.react';
 
@@ -81,7 +81,6 @@ export default function RoomPage() {
     try {
       await startGame(roomId);
     } catch (error) {
-      console.error('Start game error:', error);
       setError(`Failed to start game: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setLoading(false);
     }
